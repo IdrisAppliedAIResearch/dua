@@ -1,0 +1,663 @@
+:root {
+  --page-w: 420px;
+  --page-h: 600px;
+  --pad-inner: calc(var(--page-w) * 0.13);
+  --pad-outer: calc(var(--page-w) * 0.115);
+  --pad-top: calc(var(--page-h) * 0.115);
+  --pad-bottom: calc(var(--page-h) * 0.145);
+  --col-w: calc(var(--page-w) - var(--pad-inner) - var(--pad-outer));
+  --col-h: calc(var(--page-h) - var(--pad-top) - var(--pad-bottom));
+
+  --ink: #242a21;
+  --ink-soft: rgba(36, 42, 33, 0.62);
+  --ink-faint: rgba(36, 42, 33, 0.42);
+  --accent: #1e5c40;
+  --danger: #8c2e2e;
+  --paper: #f2ead7;
+  --paper-edit: #ece2cb;
+  --paper-shade: rgba(58, 82, 66, 0.13);
+  --gold: #c9a45a;
+  --gold-soft: rgba(201, 164, 90, 0.55);
+  --leather: #0f3728;
+  --leather-hi: #1c543d;
+  --leather-lo: #082419;
+  --ease-turn: cubic-bezier(0.4, 0.05, 0.2, 1);
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+html, body { height: 100%; }
+
+@supports (height: 100dvh) {
+  html, body { height: 100dvh; }
+}
+
+body {
+  font-family: 'EB Garamond', 'Palatino Linotype', Palatino, Georgia, 'Noto Naskh Arabic', 'Scheherazade New', 'Traditional Arabic', serif;
+  background:
+    radial-gradient(140% 100% at 50% 12%, rgba(52, 96, 72, 0.42) 0%, rgba(24, 52, 38, 0.3) 55%, rgba(0, 0, 0, 0.55) 100%),
+    #101f18;
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
+  overscroll-behavior: none;
+  touch-action: manipulation;
+  color: var(--ink);
+}
+
+.stage {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  perspective: 2400px;
+}
+
+.stage::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: radial-gradient(115% 95% at 50% 42%, transparent 62%, rgba(0, 0, 0, 0.5) 100%);
+}
+
+.book {
+  position: relative;
+  width: calc(2 * var(--page-w));
+  height: var(--page-h);
+  transform-style: preserve-3d;
+  transition: transform 0.75s var(--ease-turn);
+}
+
+.book.closed { transform: translateX(calc(-1 * var(--page-w) / 2)); }
+
+.desk-shadow {
+  position: absolute;
+  inset: 0;
+  filter: blur(26px);
+  background: rgba(0, 0, 0, 0.55);
+  transform: translateZ(-2px) translateY(14px);
+  border-radius: 4px;
+  transition: left 0.75s var(--ease-turn), width 0.75s var(--ease-turn);
+}
+
+.book.closed .desk-shadow { left: 50%; width: 50%; }
+
+.grain-face::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  pointer-events: none;
+  opacity: 0.5;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0.32 0 0 0 0 0.42 0 0 0 0 0.34 0 0 0 0.05 0'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+.leaf {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  width: var(--page-w);
+  height: var(--page-h);
+  transform-origin: left center;
+  transform-style: preserve-3d;
+  transition: transform 0.75s var(--ease-turn);
+}
+
+.leaf.flipped { transform: rotateY(-180deg); }
+.leaf.dormant { display: none; }
+.book.instant .leaf { transition: none; }
+.leaf.animating { z-index: 400 !important; }
+
+.face {
+  position: absolute;
+  inset: 0;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+  background-color: var(--paper);
+  overflow: hidden;
+}
+
+.face.back { transform: rotateY(180deg); }
+
+.face.recto::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+  background:
+    linear-gradient(to right, var(--paper-shade), transparent 14%),
+    linear-gradient(to left, rgba(58, 82, 66, 0.06), transparent 7%);
+}
+
+.face.verso::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+  background:
+    linear-gradient(to left, var(--paper-shade), transparent 14%),
+    linear-gradient(to right, rgba(58, 82, 66, 0.06), transparent 7%);
+}
+
+.backcover {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  width: var(--page-w);
+  height: var(--page-h);
+  background-color: var(--paper);
+  background-image: linear-gradient(to right, var(--paper-shade), transparent 12%);
+  z-index: 0;
+}
+
+.book.closed .backcover { visibility: hidden; }
+
+/* ---------- cover ---------- */
+
+.cover {
+  background:
+    linear-gradient(to right, rgba(0, 0, 0, 0.32), transparent 9%),
+    linear-gradient(165deg, var(--leather-hi) 0%, var(--leather) 46%, var(--leather-lo) 100%);
+  cursor: pointer;
+}
+
+.cover .frame-outer {
+  position: absolute;
+  inset: calc(var(--page-w) * 0.045);
+  border: 1px solid var(--gold-soft);
+  pointer-events: none;
+}
+
+.cover .frame-inner {
+  position: absolute;
+  inset: calc(var(--page-w) * 0.062);
+  border: 1px solid rgba(201, 164, 90, 0.35);
+  pointer-events: none;
+}
+
+.cover-title {
+  position: absolute;
+  top: 34%;
+  left: 0;
+  right: 0;
+  text-align: center;
+  font-size: calc(var(--page-w) * 0.058);
+  font-weight: 500;
+  letter-spacing: 0.38em;
+  text-indent: 0.38em;
+  color: var(--gold);
+  text-shadow:
+    0 1px 1px rgba(0, 0, 0, 0.65),
+    0 -1px 0 rgba(255, 226, 170, 0.16);
+}
+
+.cover-fleuron {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  right: 0;
+  text-align: center;
+  font-size: calc(var(--page-w) * 0.07);
+  color: rgba(201, 164, 90, 0.7);
+}
+
+/* Arabic invocation under the Latin title; glyphs come from the
+   system naskh fallback of the body stack */
+.cover-sub {
+  position: absolute;
+  top: calc(34% + var(--page-w) * 0.078);
+  left: 0;
+  right: 0;
+  text-align: center;
+  direction: rtl;
+  font-size: calc(var(--page-w) * 0.044);
+  color: rgba(201, 164, 90, 0.78);
+  text-shadow: 0 1px 1px rgba(0, 0, 0, 0.6);
+  pointer-events: none;
+}
+
+/* ---------- endpaper / invitation ---------- */
+
+.endpaper, .backcover {
+  box-shadow:
+    inset 0 0 0 1px rgba(201, 164, 90, 0.45),
+    inset 0 0 0 6px var(--paper),
+    inset 0 0 0 7px rgba(201, 164, 90, 0.22);
+}
+
+.end-flourish, .cover-ornament {
+  position: absolute;
+  top: 45%;
+  left: 50%;
+  width: 84px;
+  height: 12px;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+
+.end-flourish::before, .cover-ornament::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  border-top: 1px solid;
+}
+
+/* the eight-point star (rub el Hizb) replaces the old diamond */
+.end-flourish::after, .cover-ornament::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 11px;
+  height: 11px;
+  transform: translate(-50%, -50%);
+  clip-path: polygon(50% 0%, 61.7% 20.6%, 85.4% 14.6%, 79.4% 38.3%, 100% 50%, 79.4% 61.7%, 85.4% 85.4%, 61.7% 79.4%, 50% 100%, 38.3% 79.4%, 14.6% 85.4%, 20.6% 61.7%, 0% 50%, 20.6% 38.3%, 14.6% 14.6%, 38.3% 20.6%);
+}
+
+.end-flourish::before { border-color: rgba(30, 92, 64, 0.4); }
+.cover-ornament::before { border-color: var(--gold-soft); }
+.end-flourish::after { background: rgba(30, 92, 64, 0.5); }
+.cover-ornament::after { background: var(--gold); }
+
+.invitation {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 64px;
+  height: 64px;
+  transform: translate(-50%, -50%);
+  border: 1px solid rgba(36, 42, 33, 0.16);
+  border-radius: 50%;
+  color: rgba(36, 42, 33, 0.24);
+  cursor: pointer;
+  transition: border-color 0.25s, color 0.25s;
+}
+
+.invitation svg { position: absolute; top: 50%; left: 50%; width: 26px; height: 26px; transform: translate(-50%, -50%); }
+.invitation:hover { border-color: rgba(30, 92, 64, 0.45); color: rgba(30, 92, 64, 0.55); }
+
+/* ---------- page content ---------- */
+
+.page-body {
+  position: absolute;
+  top: var(--pad-top);
+  bottom: var(--pad-bottom);
+  left: var(--pad-inner);
+  right: var(--pad-outer);
+  overflow: hidden;
+}
+
+.face.recto .page-body { left: var(--pad-inner); right: var(--pad-outer); }
+.face.verso .page-body { right: var(--pad-inner); left: var(--pad-outer); }
+
+.entry { position: relative; }
+
+.e-date {
+  font-size: calc(var(--page-w) * 0.033);
+  font-variant: small-caps;
+  letter-spacing: 0.16em;
+  color: var(--accent);
+  margin-bottom: calc(var(--page-h) * 0.028);
+}
+
+.e-title {
+  font-style: italic;
+  font-weight: 400;
+  font-size: calc(var(--page-w) * 0.052);
+  margin-bottom: calc(var(--page-h) * 0.02);
+}
+
+.page-body p, .measure p,
+.page-body .e-date, .measure .e-date,
+.page-body .e-title, .measure .e-title {
+  font-size: calc(var(--page-w) * 0.0405);
+  line-height: 1.62;
+}
+
+.page-body p { font-size: calc(var(--page-w) * 0.0405); }
+.measure p, .measure .e-date, .measure .e-title { font-size: calc(var(--page-w) * 0.0405); }
+
+/* pagination measures in #measure: its paragraphs must be typographically
+   identical to real page paragraphs, or every filled page overflows by the
+   unmeasured inter-section gap */
+.page-body p, .measure p {
+  text-align: left;
+  hyphens: none;
+}
+
+/* Notes spacing: sections are separated by exactly one empty line — a full
+   line box (1.62em = the paragraph line-height) — with no first-line indent,
+   so every line starts flush at the left margin as it types. The gap is the
+   following paragraph's margin-top, never a trailing margin, so it drops at
+   page breaks: no page ever begins with an empty line. A deliberate empty
+   line (two Enters) renders as a zero-height paragraph, doubling the gap */
+.page-body p + p, .measure p + p { margin-top: 1.62em; }
+
+.folio {
+  position: absolute;
+  bottom: calc(var(--page-h) * 0.052);
+  font-style: italic;
+  font-size: calc(var(--page-w) * 0.032);
+  color: var(--ink-faint);
+}
+
+.face.recto .folio { right: var(--pad-outer); }
+.face.verso .folio { left: var(--pad-outer); }
+
+.pencil {
+  position: absolute;
+  top: calc(var(--page-h) * 0.045);
+  width: 22px;
+  height: 22px;
+  border: none;
+  background: none;
+  color: var(--ink-soft);
+  opacity: 0;
+  cursor: pointer;
+  transition: opacity 0.2s;
+  padding: 0;
+  z-index: 3;
+}
+
+.pencil svg { width: 100%; height: 100%; }
+
+.face.recto .pencil { right: calc(var(--page-w) * 0.055); }
+.face.verso .pencil { left: calc(var(--page-w) * 0.055); }
+
+.face:hover .pencil { opacity: 0.55; }
+.pencil:hover { opacity: 0.9 !important; }
+
+/* touch devices: no hover, so keep the pencil visible and make it finger-sized */
+@media (hover: none) {
+  .pencil { opacity: 0.45; width: 30px; height: 30px; }
+  /* the keyboard covers the page bottom on phones: rail buttons belong at the top */
+  .icon-rail { bottom: auto; top: calc(var(--page-h) * 0.16); gap: 18px; }
+  .icon-rail button { width: 34px; height: 34px; }
+  .idx-name { font-size: 1.15rem; }
+  .idx-page { font-size: 1rem; }
+}
+
+/* turn affordance: corner lift on the current outer faces */
+
+.face .curl {
+  position: absolute;
+  width: 38px;
+  height: 38px;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.25s;
+}
+
+.face.recto .curl {
+  right: 0;
+  bottom: calc(var(--page-h) * 0.025);
+  background:
+    linear-gradient(135deg, transparent 0 50%, rgba(34, 52, 40, 0.14) 50% 54%, transparent 54%),
+    linear-gradient(135deg, #f8f1e0 0 50%, transparent 50%);
+}
+
+.face.verso .curl {
+  left: 0;
+  bottom: calc(var(--page-h) * 0.025);
+  background:
+    linear-gradient(45deg, transparent 0 50%, rgba(34, 52, 40, 0.14) 50% 54%, transparent 54%),
+    linear-gradient(45deg, transparent 50%, #f8f1e0 50%);
+}
+
+@media (hover: hover) {
+  .face.cur-right:hover .curl, .face.cur-left:hover .curl { opacity: 1; }
+}
+
+/* ---------- edit mode ---------- */
+
+.entry.editing .e-date,
+.entry.editing .e-title,
+.entry.editing p {
+  outline: none;
+  background-color: transparent;
+  border-radius: 3px;
+  transition: background-color 0.25s;
+}
+
+/* the edited page reads as one continuous text: only the paragraph actually
+   holding the caret is faintly tinted, not a stack of tinted islands */
+.entry.editing .e-date:focus,
+.entry.editing .e-title:focus,
+.entry.editing p:focus {
+  background-color: rgba(30, 92, 64, 0.05);
+}
+
+/* a deliberate empty line (two Enters) needs a clickable, typable height */
+.entry.editing p:empty {
+  min-height: 1.62em;
+}
+
+.entry.editing p { text-align: left; hyphens: none; }
+
+.book .face.editing-page { background-color: var(--paper-edit); }
+
+::selection { background: rgba(201, 164, 90, 0.35); }
+
+.icon-rail {
+  position: absolute;
+  bottom: calc(var(--page-h) * 0.035);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  z-index: 30;
+  opacity: 0;
+  transition: opacity 0.25s;
+}
+
+.icon-rail.shown { opacity: 1; }
+
+.icon-rail.right { right: calc(var(--page-w) * 0.028); }
+.icon-rail.left { left: calc(var(--page-w) * 0.028); }
+
+.icon-rail button {
+  width: 26px;
+  height: 26px;
+  border: none;
+  background: none;
+  padding: 0;
+  color: var(--ink-soft);
+  cursor: pointer;
+  transition: color 0.15s, transform 0.15s;
+}
+
+.icon-rail button svg { width: 100%; height: 100%; }
+.icon-rail button:hover { color: var(--ink); transform: scale(1.12); }
+.icon-rail button.dim { opacity: 0.3; cursor: default; }
+.icon-rail button.armed { color: var(--danger); }
+.icon-rail button.armed svg { fill: rgba(140, 46, 46, 0.22); }
+
+/* ---------- offline blot ---------- */
+
+.offline {
+  position: fixed;
+  bottom: 26px;
+  right: 30px;
+  width: 22px;
+  height: 22px;
+  color: rgba(30, 22, 14, 0.85);
+}
+
+.offline svg { width: 100%; height: 100%; fill: currentColor; opacity: 0.8; }
+
+/* ---------- measure ---------- */
+
+.measure {
+  position: fixed;
+  left: -10000px;
+  top: 0;
+  width: var(--col-w);
+  visibility: hidden;
+  font-size: calc(var(--page-w) * 0.0405);
+}
+
+.measure .e-date { font-size: calc(var(--page-w) * 0.033); }
+.measure .e-title { font-size: calc(var(--page-w) * 0.052); }
+
+/* ---------- one page at a time ---------- */
+
+/* every viewport renders a single page (JS geom().single is always true);
+   the two-page spread rules above stay as history for a possible return */
+.book { width: var(--page-w); }
+.book.closed { transform: none; }
+.book.instant { transition: none; }
+.book.closed .desk-shadow { left: 0; width: 100%; }
+.leaf { left: 0; }
+.backcover { left: 0; }
+.leaf.flipped { transform: rotateY(-180deg); }
+
+/* A turned leaf hangs its blank back one page-width past the box's left
+   edge: on the phone that overhang fell off the viewport edge for free, on
+   a desktop it would read as an empty left page (user request 2026-11-11).
+   Keep the paper visible while the turn is in flight; tuck it away once
+   the leaf has landed. */
+.leaf.flipped:not(.animating) > .face.back { visibility: hidden; }
+
+.mode-edit .pencil { display: none; }
+.mode-edit .curl { opacity: 0 !important; }
+
+/* ---------- index overlay ---------- */
+
+#index-tab {
+  position: fixed;
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 520;
+  font-family: inherit;
+  font-variant: small-caps;
+  letter-spacing: 0.18em;
+  font-size: 13px;
+  color: var(--paper);
+  background: rgba(0, 0, 0, 0.32);
+  border: 1px solid rgba(240, 228, 200, 0.28);
+  border-radius: 3px;
+  padding: 4px 14px 5px;
+  cursor: pointer;
+}
+
+#index-tab:hover { background: rgba(0, 0, 0, 0.5); }
+.mode-edit #index-tab { display: none; }
+
+#index-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 600;
+  background: var(--paper);
+  color: var(--ink);
+}
+
+#index-scroll {
+  position: absolute;
+  inset: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  touch-action: pan-y;
+  -webkit-overflow-scrolling: touch;
+  padding: 34px 22px 170px;
+}
+
+#index-list {
+  list-style: none;
+  max-width: 620px;
+  margin: 0 auto;
+}
+
+#index-list li {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 10px 4px;
+  border-bottom: 1px dotted rgba(30, 42, 34, 0.28);
+  cursor: pointer;
+}
+
+#index-list li:hover .idx-name { color: var(--accent); }
+
+.idx-name {
+  flex: 1;
+  font-size: calc(var(--page-w) * 0.055);
+  min-width: 0;
+}
+
+.idx-page {
+  font-style: italic;
+  font-size: calc(var(--page-w) * 0.045);
+  color: var(--ink-faint);
+  font-variant-numeric: oldstyle-nums;
+}
+
+#index-go {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px calc(14px + env(safe-area-inset-bottom, 0px));
+  background: var(--paper);
+  border-top: 1px solid rgba(30, 42, 34, 0.25);
+  box-shadow: 0 -6px 18px rgba(30, 42, 34, 0.12);
+}
+
+#index-page {
+  width: 84px;
+  font-family: inherit;
+  font-style: italic;
+  font-size: 17px;
+  text-align: center;
+  color: var(--ink);
+  background: none;
+  border: none;
+  border-bottom: 1px solid rgba(30, 42, 34, 0.45);
+  padding: 4px 6px;
+}
+
+#index-go-btn,
+#index-new,
+#index-close {
+  font-family: inherit;
+  font-variant: small-caps;
+  letter-spacing: 0.12em;
+  font-size: 15px;
+  color: var(--ink);
+  background: none;
+  border: 1px solid rgba(30, 42, 34, 0.4);
+  border-radius: 3px;
+  padding: 10px 16px;
+  min-height: 40px;
+  cursor: pointer;
+}
+
+#index-new {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 12px;
+  color: var(--ink-faint);
+}
+
+#index-new svg { width: 16px; height: 16px; flex: none; }
+
+#index-close { padding: 8px 12px; color: var(--ink-faint); }
+#index-go-btn:hover,
+#index-new:hover { border-color: var(--accent); color: var(--accent); }
+
+#index-go {
+  flex-wrap: wrap;
+  row-gap: 10px;
+  padding: 12px 16px calc(12px + env(safe-area-inset-bottom, 0px));
+}
+#index-page { width: 64px; }
+#index-scroll { padding-bottom: 170px; }

@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dua</title>
+<link rel="apple-touch-icon" href="icons/icon-180.png">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" type="image/png" href="icons/icon-180.png">
+<meta name="theme-color" content="#0f3728">
+<link rel="stylesheet" href="fonts/fonts.css">
+<link rel="stylesheet" href="css/dua.css?v=20261112c">
+</head>
+<body>
+<div class="stage" id="stage">
+  <div class="book closed" id="book">
+    <div class="desk-shadow"></div>
+    <div class="backcover grain-face"><div class="end-flourish"></div></div>
+  </div>
+  <div class="offline" id="offline" hidden>
+    <svg viewBox="0 0 24 24"><path d="M12 3c3 3.5 6.5 6 6.5 10a6.5 6.5 0 1 1-13 0C5.5 9 9 6.5 12 3z"/></svg>
+  </div>
+</div>
+<div class="measure" id="measure" aria-hidden="true"></div>
+<button id="index-tab" title="index">Index</button>
+<div id="index-overlay" hidden>
+  <div id="index-scroll">
+    <ul id="index-list"></ul>
+  </div>
+  <div id="index-go">
+    <input id="index-page" type="text" inputmode="numeric" autocomplete="off"
+           aria-label="go to page number">
+    <button id="index-go-btn">Go to page</button>
+    <button id="index-close" aria-label="close index">&#10005;</button>
+    <button id="index-new" aria-label="new entry" title="new entry">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 6v12M6 12h12"/></svg>
+    </button>
+  </div>
+</div>
+<script type="module" src="js/main.js?v=20261112c"></script>
+</body>
+</html>
