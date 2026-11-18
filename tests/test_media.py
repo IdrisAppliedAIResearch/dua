@@ -40,7 +40,7 @@ def _b64(data: bytes) -> str:
 
 
 def test_a_picture_is_stored_in_the_database_next_to_the_words(book, tmp_path):
-    """No folder beside the database, no file to lose on the way to the Pi."""
+    """No folder beside the database, no file to lose on the way to the server."""
     assert not (tmp_path / "media").exists()
     row = sqlite3.connect(str(tmp_path / "dua.db")).execute(
         "SELECT name, mime, length(bytes), sha256 FROM media"

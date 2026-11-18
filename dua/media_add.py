@@ -2,10 +2,10 @@
 
     python -m dua.media_add [--url http://127.0.0.1:8644] FILE [FILE ...]
 
-Nothing here opens the database: the app is the only writer, on the Pi as much
-as at home, so a picture travels as base64 over HTTP and lands in the same
-SQLite file as the words. The stored name is the file's own name; a second add
-of the same name replaces the bytes.
+Nothing here opens the database: the app is the only writer wherever it runs, so
+a picture travels as base64 over HTTP and lands in the same SQLite file as the
+words. The stored name is the file's own name; a second add of the same name
+replaces the bytes.
 
 Afterwards, name the picture in an entry as a paragraph of its own:
 
