@@ -5,3 +5,10 @@ ops/
 __pycache__/
 .pytest_cache/
 node_modules/
+
+# A picture is a row in data/dua.db now, not a file beside it. Loose JPEGs under
+# data/media/ are only the source for a re-encode; the book travels in the .db.
+data/media/
+
+# iPhone originals waiting to be re-encoded — a .heic is not a browser format.
+backup/*.heic

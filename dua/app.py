@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import base64
+import binascii
 import logging
 import os
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -26,6 +28,11 @@ class EntryPayload(BaseModel):
     body: str
 
 
+class MediaPayload(BaseModel):
+    name: str
+    data_b64: str
+
+
 def create_app(db_path: str | Path | None = None) -> FastAPI:
     root = Path(__file__).resolve().parent.parent
     store = EntryStore(db_path or os.environ.get("DUA_DB") or root / "data" / "dua.db")
@@ -38,6 +45,23 @@ def create_app(db_path: str | Path | None = None) -> FastAPI:
             raise HTTPException(status_code=404, detail="not found")
         except ValidationError as exc:
             raise HTTPException(status_code=422, detail=str(exc))
+
+    @app.middleware("http")
+    async def cache_policy(request: Request, call_next) -> Response:
+        """The book client is a handful of stamped files behind one index.html.
+
+        A cached shell pins last week's JavaScript, which then renders a
+        picture line as a sentence - so the shell is always revalidated, and
+        the API is never cached at all. The stamped /js and /css files keep
+        browser heuristics: their name changes when their contents do.
+        """
+        response = await call_next(request)
+        path = request.url.path
+        if path.startswith("/api/"):
+            response.headers["Cache-Control"] = "no-store"
+        elif path == "/" or path.endswith(".html"):
+            response.headers["Cache-Control"] = "no-cache"
+        return response
 
     @app.get("/api/entries")
     def list_entries() -> Any:
@@ -87,13 +111,41 @@ def create_app(db_path: str | Path | None = None) -> FastAPI:
         logger.exception("unhandled error on %s %s", request.method, request.url.path)
         return JSONResponse({"detail": "server error"}, status_code=500)
 
-    # Embedded pictures: a body line naming media/<file> is served from a
-    # directory beside the database, never from the code tree. Registered
-    # before "/" so the static book client cannot swallow the path; a missing
-    # file is a 404 the client renders as the plain-text line it came from.
-    media_dir = Path(os.environ.get("DUA_MEDIA") or (Path(store.path).parent / "media"))
-    media_dir.mkdir(parents=True, exist_ok=True)
-    app.mount("/media", StaticFiles(directory=media_dir), name="media")
+    # Pictures are bytes in this database, named by a body line. A name is a
+    # table key and never a path, so there is no directory to traverse: an
+    # unknown name is a 404, which the client renders as the plain-text line it
+    # came from. Registered before "/" so the book client cannot swallow it.
+
+    @app.get("/api/media")
+    def list_media() -> Any:
+        return store.list_media()
+
+    @app.post("/api/media", status_code=201)
+    def put_media(payload: MediaPayload) -> Any:
+        try:
+            data = base64.b64decode(payload.data_b64, validate=True)
+        except (binascii.Error, ValueError):
+            raise HTTPException(status_code=422, detail="data_b64 is not base64")
+        existed = store.has_media(payload.name.strip())
+        meta = guard(store.put_media, name=payload.name, data=data)
+        return JSONResponse(meta, status_code=200 if existed else 201)
+
+    @app.get("/api/media/{name}")
+    def media_meta(name: str) -> Any:
+        return guard(store.media_meta, name)
+
+    @app.delete("/api/media/{name}", status_code=204)
+    def delete_media(name: str) -> None:
+        guard(store.delete_media, name)
+
+    @app.get("/media/{name}")
+    def media_file(name: str, request: Request) -> Any:
+        row = guard(store.get_media, name)
+        etag = '"%s"' % row["sha256"]
+        headers = {"ETag": etag, "Cache-Control": "no-cache"}
+        if request.headers.get("if-none-match") == etag:
+            return Response(status_code=304, headers=headers)
+        return Response(content=row["bytes"], media_type=row["mime"], headers=headers)
 
     app.mount("/", StaticFiles(directory=WEB_DIR, html=True), name="web")
     return app

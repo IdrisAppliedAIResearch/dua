@@ -1,4 +1,5 @@
-"""SQLite persistence for Dua. One file, one table, plain text bodies.
+"""SQLite persistence for Dua. One file, two tables: the words as text, the
+pictures as bytes.
 
 INVARIANT: bodies are the author's words, verbatim. Never rewrite them —
 no correction, reformatting, or "improvement" at any layer.
@@ -6,6 +7,7 @@ no correction, reformatting, or "improvement" at any layer.
 
 from __future__ import annotations
 
+import hashlib
 import sqlite3
 import threading
 from datetime import date as _date
@@ -24,6 +26,14 @@ CREATE TABLE IF NOT EXISTS entries (
     updated_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_entries_order ON entries ((date IS NOT NULL), date, id);
+CREATE TABLE IF NOT EXISTS media (
+    name TEXT PRIMARY KEY,
+    mime TEXT NOT NULL,
+    bytes BLOB NOT NULL,
+    sha256 TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
 """
 
 
@@ -80,6 +90,46 @@ def _check_date(value: str) -> str:
     except (TypeError, ValueError):
         raise ValidationError(f"date must be YYYY-MM-DD, got {value!r}")
     return parsed.isoformat()
+
+
+# A body names a picture as `media/<name>`; the bytes live in this database, so
+# the name is a table key and never a path. Only types a browser can decode are
+# accepted, and the extension decides the content type the route will answer
+# with - nothing here ever guesses a type from the bytes.
+MEDIA_TYPES = {
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".png": "image/png",
+    ".webp": "image/webp",
+    ".gif": "image/gif",
+}
+MAX_MEDIA_BYTES = 20 * 1024 * 1024
+
+
+def _check_media(name: str, data: bytes) -> str:
+    """Return the content type for this name, or refuse the picture."""
+    if not isinstance(name, str) or not name.strip():
+        raise ValidationError("name must not be empty")
+    name = name.strip()
+    if len(name) > 200:
+        raise ValidationError("name is too long")
+    if "/" in name or "\\" in name or ".." in name or name.startswith("."):
+        raise ValidationError(f"name must be a single file name, got {name!r}")
+    mime = MEDIA_TYPES.get(Path(name).suffix.lower())
+    if mime is None:
+        raise ValidationError(
+            "unsupported picture type %r, expected one of %s"
+            % (Path(name).suffix, ", ".join(sorted(MEDIA_TYPES)))
+        )
+    if not isinstance(data, (bytes, bytearray)):
+        raise ValidationError("picture data must be bytes")
+    if not data:
+        raise ValidationError("picture data is empty")
+    if len(data) > MAX_MEDIA_BYTES:
+        raise ValidationError(
+            f"picture is {len(data)} bytes, over the {MAX_MEDIA_BYTES} byte limit"
+        )
+    return mime
 
 
 class EntryStore:
@@ -174,3 +224,64 @@ class EntryStore:
 
     def export(self) -> dict[str, Any]:
         return {"app": "dua", "version": EXPORT_VERSION, "entries": self.list()}
+
+    # Pictures: bytes in this file, named by a body line. Removing the line from
+    # an entry never touches the stored picture, and deleting a picture never
+    # touches any body - the two are only ever joined at render time.
+
+    def list_media(self) -> list[dict[str, Any]]:
+        with self._lock:
+            cur = self._conn.execute(
+                "SELECT name, mime, length(bytes) AS bytes, sha256,"
+                " created_at, updated_at FROM media ORDER BY name"
+            )
+            return [dict(r) for r in cur.fetchall()]
+
+    def has_media(self, name: str) -> bool:
+        with self._lock:
+            return (
+                self._conn.execute("SELECT 1 FROM media WHERE name = ?", (name,)).fetchone()
+                is not None
+            )
+
+    def get_media(self, name: str) -> dict[str, Any]:
+        with self._lock:
+            row = self._conn.execute("SELECT * FROM media WHERE name = ?", (name,)).fetchone()
+            if row is None:
+                raise NotFound(f"picture {name}")
+            return dict(row)
+
+    def put_media(self, *, name: str, data: bytes) -> dict[str, Any]:
+        name = (name or "").strip()
+        mime = _check_media(name, data)
+        digest = hashlib.sha256(bytes(data)).hexdigest()
+        now = _utcnow()
+        with self._lock:
+            self._conn.execute(
+                "INSERT INTO media (name, mime, bytes, sha256, created_at, updated_at)"
+                " VALUES (?, ?, ?, ?, ?, ?)"
+                " ON CONFLICT(name) DO UPDATE SET mime=excluded.mime,"
+                " bytes=excluded.bytes, sha256=excluded.sha256, updated_at=excluded.updated_at",
+                (name, mime, sqlite3.Binary(data), digest, now, now),
+            )
+            self._conn.commit()
+            return self.media_meta(name)
+
+    def media_meta(self, name: str) -> dict[str, Any]:
+        """One row without its bytes: what the API answers with."""
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT name, mime, length(bytes) AS bytes, sha256,"
+                " created_at, updated_at FROM media WHERE name = ?",
+                (name,),
+            ).fetchone()
+            if row is None:
+                raise NotFound(f"picture {name}")
+            return dict(row)
+
+    def delete_media(self, name: str) -> None:
+        with self._lock:
+            cur = self._conn.execute("DELETE FROM media WHERE name = ?", (name,))
+            self._conn.commit()
+            if cur.rowcount == 0:
+                raise NotFound(f"picture {name}")

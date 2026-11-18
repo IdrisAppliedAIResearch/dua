@@ -1,27 +1,24 @@
 import { spawn } from "node:child_process";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync } from "node:fs";
 import { startChrome, CDP, sleep, assert } from "./lib.mjs";
 
 const PORT = 8647;
 const CDP_PORT = 9335 + (process.pid % 50);
 const APP_URL = `http://127.0.0.1:${PORT}/`;
 const DB = process.env.TEMP + "/dua-e2e-" + Date.now() + ".db";
-const MEDIA = process.env.TEMP + "/dua-e2e-media-" + Date.now();
 
 mkdirSync(new URL("./shots/", import.meta.url), { recursive: true });
-mkdirSync(MEDIA, { recursive: true });
-// a real (tiny) PNG, so /media serves real bytes and the <img> decodes
+// a real (tiny) PNG, so the API stores real bytes and the <img> decodes
 const PNG = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAQAAAAECAYAAACp8Z5+AAAAFUlEQVR4nGP8z8DAwMDAxMDAwMAAAA" +
     "wAAwA6eQx8AAAAAElFTkSuQmCC",
   "base64"
 );
-for (const name of ["p1.png", "p2.png", "p3.png"]) writeFileSync(`${MEDIA}/${name}`, PNG);
 
 const server = spawn(
   "python",
   ["-c", "import uvicorn;from dua.app import create_app;uvicorn.run(create_app(),port=8647,log_level='warning')"],
-  { env: { ...process.env, DUA_DB: DB, DUA_MEDIA: MEDIA }, stdio: "ignore" }
+  { env: { ...process.env, DUA_DB: DB }, stdio: "ignore" }
 );
 
 let chrome = null;
@@ -34,6 +31,17 @@ try {
     if (!up) await sleep(200);
   }
   if (!up) throw new Error("server never came up");
+
+  // A picture is bytes in the database now, so the harness adds its three the
+  // way anything else does: one POST each, no folder staged beside the book.
+  for (const name of ["p1.png", "p2.png", "p3.png"]) {
+    const put = await fetch(APP_URL + "api/media", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, data_b64: PNG.toString("base64") }),
+    });
+    if (!put.ok) throw new Error(`could not add ${name}: HTTP ${put.status}`);
+  }
 
   const chrome_ = await startChrome(CDP_PORT);
   chrome = chrome_;

@@ -35,8 +35,9 @@ dua/
   main.py               entry point: starts uvicorn, opens browser
   dua/
     __init__.py
-    app.py              FastAPI factory: REST API + static mount
-    store.py            sqlite repository (schema, CRUD, export)
+    app.py              FastAPI factory: REST API + /media route + static mount
+    store.py            sqlite repository (schema, CRUD, export, picture bytes)
+    media_add.py        CLI: put picture files into a running app over HTTP
   web/
     index.html          single page shell
     css/dua.css design system + book geometry + mode states
@@ -47,10 +48,10 @@ dua/
     js/book.js          leaf/spread model + turn animation + navigation
     js/editor.js       edit mode: in-place contenteditable + icon rail
     fonts/              vendored woff2 + fonts.css
-  data/                 dua.db (created at runtime; never committed)
-    media/              pictures referenced by media/<file> lines in bodies
+  data/                 dua.db — tracked, and it IS the book: one file holding the
+                        entries and, in a media table, their pictures
   tests/test_api.py     CRUD workflow tests (pytest)
-  tests/test_media.py   /media mount + media-line round-trip tests (pytest)
+  tests/test_media.py   picture storage + media-line round-trip tests (pytest)
   qa/shot.mjs           headless-Chrome screenshot tool (raw CDP)
   qa/workflow.mjs       scripted end-to-end user-workflow test (raw CDP)
   docs/ARCHITECTURE.md  this file
@@ -59,7 +60,8 @@ dua/
 
 ## Data model
 
-One table; the book of dua is a list of entries. Entries may be undated (e.g. the imported
+Two tables in one file: the words as text, the pictures as bytes. The book of dua is
+a list of entries. Entries may be undated (e.g. the imported
 dua, which the author kept without dates); undated entries appear first, in
 insertion order, and show no date line on the page.
 
@@ -73,28 +75,61 @@ entries(
   created_at TEXT NOT NULL,      -- ISO-8601 UTC
   updated_at TEXT NOT NULL       -- ISO-8601 UTC
 )
+
+media(
+  name TEXT PRIMARY KEY,         -- what a body line names: "01-IMG_1578.jpg". A key,
+                                 -- never a path — there is no directory to traverse
+  mime TEXT NOT NULL,            -- from the name's extension, never sniffed from bytes
+  bytes BLOB NOT NULL,           -- the picture itself, in this file, beside the words
+  sha256 TEXT NOT NULL,          -- the ETag for /media/<name>
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+)
 ```
 
 No rich text, no markdown: plain text is the most durable format. Paragraphs = blank
 lines. The client renders them typographically; the server never interprets them.
 
-**The one extension: an embedded picture is a paragraph that names a file.** A body
+**The one extension: an embedded picture is a paragraph that names a picture.** A body
 paragraph whose entire text matches `media/<name>.<jpg|jpeg|png|webp|gif>` (letter or
 digit first, no leading path, no spaces around it) is stored as that exact line and
 rendered as the picture instead of as words. Nothing else about the format changes:
 
 - The API and the export still carry plain text. The line *is* the reference, so a
   backup of the SQLite file or an `/api/export` JSON still says which picture belongs
-  where — even if the file itself is gone.
-- `media/` files live in a directory beside the database (`data/media/` by default,
-  `DUA_MEDIA` to move it), served read-only by the app at `/media/<name>`. The words
-  in a picture stay inside the picture: there is no alt text, because a caption field
-  would be a second place the author's words could drift.
+  where — even if the picture itself is gone.
+- The bytes live in a `media` table **in the same database file** as the entries:
+  `name` (primary key, and the only thing a body line names), `mime`, `bytes`,
+  `sha256`, `created_at`, `updated_at`. There is no picture folder to keep in step
+  with the book, so the `.db` file *is* the whole book — what gets shipped to the Pi,
+  what a backup restores, what an export of the words does not have to carry.
+  `python -m dua.media_add FILE…` puts pictures in over HTTP, so the app stays the
+  only writer of its own database. The words in a picture stay inside the picture:
+  there is no alt text, because a caption field would be a second place the author's
+  words could drift.
+- `/media/<name>` is a route, not a static mount: it looks the name up and answers
+  with the stored bytes, the stored mime, an `ETag` of the `sha256` and
+  `Cache-Control: no-cache` (honouring `If-None-Match`). A name is a table key and
+  never a path, so there is no directory to traverse; an unknown name is a plain 404
+  and the client turns that back into the line it came from.
+- Type comes from the name, never sniffed from the bytes, and only what a browser can
+  decode is accepted: `.jpg .jpeg .png .webp .gif`. An iPhone `.heic` must be
+  re-encoded first; the layout then scales whatever arrives.
 - The server never rewrites or validates these lines — it has no idea they are
-  special. Only `layout.js` recognizes them (`MEDIA_RE`); `/media` is a plain
-  read-only static mount that knows only filenames. Anything that merely *looks*
+  special. Only `layout.js` recognizes them (`MEDIA_RE`). Anything that merely *looks*
   like a marker — `media/x.jpg extra words`, `Media/x.jpg`, a nested path — stays an
   ordinary line of text.
+
+**Committing the database file.** The store runs in WAL mode, so the newest bytes —
+after `media_add`, sometimes every picture in the book — can be sitting in
+`dua.db-wal` while `dua.db` itself is still the old, smaller file. SQLite folds them
+back on its own once the last connection closes, but `git add data/dua.db` reads the
+main file at whatever instant it is asked to. Checkpoint first, then look at the size
+before trusting the commit: a book with eleven pictures in it is not 32 KiB.
+
+```
+python -c "import sqlite3; print(sqlite3.connect('data/dua.db').execute('pragma wal_checkpoint(TRUNCATE)').fetchone())"
+```
 
 ### REST surface (`/api`)
 
@@ -106,6 +141,10 @@ rendered as the picture instead of as words. Nothing else about the format chang
 | PUT | `/api/entries/{id}` | full update `{date?, title?, name?, body}`; `name` or `date` omitted = keep stored one |
 | DELETE | `/api/entries/{id}` | 204 or 404 |
 | GET | `/api/export` | versioned JSON snapshot (Content-Disposition download) |
+| GET | `/api/media` | every picture's `name, mime, bytes, sha256, created_at, updated_at` — never the bytes |
+| POST | `/api/media` | `{name, data_b64}` → 201, or 200 if that name already existed (its bytes are replaced); 422 for a bad name or type |
+| GET | `/api/media/{name}` | one picture's metadata, 200 or 404 |
+| DELETE | `/api/media/{name}` | 204 or 404; bodies naming it are left exactly as they are |
 
 Validation: `date`, if present, must parse as `YYYY-MM-DD`; on POST a missing/`null`
 date makes the entry undated (on PUT, omitting `date` keeps the stored one);
@@ -120,11 +159,14 @@ connection is never touched concurrently). Unexpected exceptions return an opaqu
 500 and are logged with traceback on the server. Everything else talks HTTP.
 
 Runtime config is env-only: `DUA_PORT` (8644), `DUA_HOST`
-(127.0.0.1), `DUA_DB` (data/dua.db), `DUA_MEDIA` (a directory beside `DUA_DB`).
+(127.0.0.1), `DUA_DB` (data/dua.db).
 
-Outside `/api` there are two static mounts, `/media/<file>` (pictures, created on boot
-if the directory is missing; a miss is a plain 404 and never falls through to the app)
-and `/` (the `web/` shell).
+Outside `/api` there is one static mount, `/` (the `web/` shell), plus the
+`/media/<name>` route described above. A middleware sets `Cache-Control`:
+`no-store` on `/api/`, `no-cache` on `/` and `*.html`. That is not tidiness — a
+cached `index.html` pins last week's JavaScript, and last week's JavaScript
+renders a picture line as a sentence. The stamped `/js` and `/css` files keep
+browser heuristics because their URL changes when their contents do.
 
 ## Client model — codex terminology
 
@@ -226,11 +268,12 @@ only in client memory; the first save POSTs.
   text beside it (a run of them, one after another, which is how the author keeps
   hers), a click arms it and the next delete key commits. The click is consumed by
   the editor so it cannot also turn the page. Either way only the line leaves the
-  body; the file on disk is never touched. That second gesture exists because a
+  body; the picture in the database is never touched — deleting a picture is its own
+  deliberate call (`DELETE /api/media/{name}`). That second gesture exists because a
   `contenteditable=false` island produces no `beforeinput` of its own, so the
   delete key for an armed picture is listened for on the document, not the page.
-  A `media/…` line whose file is missing renders as its own text, so the reference
-  stays visible and editable rather than showing a broken-image glyph.
+  A `media/…` line whose picture is not in the database renders as its own text, so
+  the reference stays visible and editable rather than showing a broken-image glyph.
 - Keyboard: `→`/`Space`/`PgDn` next · `←`/`PgUp` prev · `Home` close (to cover,
   from first spread) · `End` last page · `Enter`/`Space` on cover opens · `e` edit
   entry under caret region · `n` new entry.
