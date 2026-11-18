@@ -51,15 +51,26 @@ def create_app(db_path: str | Path | None = None) -> FastAPI:
         """The book client is a handful of stamped files behind one index.html.
 
         A cached shell pins last week's JavaScript, which then renders a
-        picture line as a sentence - so the shell is always revalidated, and
-        the API is never cached at all. The stamped /js and /css files keep
-        browser heuristics: their name changes when their contents do.
+        picture line as a sentence. So the shell is never stored at all, the
+        stamped code is revalidated on every load, and the API is never cached
+        at all. A picture is the one thing worth holding on to: it revalidates
+        by sha256 and answers 304 instead of arriving a hundred kilobytes again.
         """
         response = await call_next(request)
         path = request.url.path
         if path.startswith("/api/"):
             response.headers["Cache-Control"] = "no-store"
         elif path == "/" or path.endswith(".html"):
+            # no-store, not merely no-cache. A shell saved while this app sent no
+            # freshness headers at all lives entirely on browser heuristics:
+            # Safari guessed hours of freshness for a six-day-old index.html and
+            # asked the server for nothing at all in that window, so no header
+            # added afterwards could ever reach it. The shell is 2 KB; it is
+            # never worth the risk of serving a stale book.
+            response.headers["Cache-Control"] = "no-store"
+        elif path.startswith("/js/") or path.startswith("/css/"):
+            # Revalidate rather than trust heuristics: bumping the ?v= stamp is
+            # the intent, but a deploy that forgets one must still land.
             response.headers["Cache-Control"] = "no-cache"
         return response
 

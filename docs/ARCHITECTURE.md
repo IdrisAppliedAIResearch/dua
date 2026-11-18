@@ -163,10 +163,15 @@ Runtime config is env-only: `DUA_PORT` (8644), `DUA_HOST`
 
 Outside `/api` there is one static mount, `/` (the `web/` shell), plus the
 `/media/<name>` route described above. A middleware sets `Cache-Control`:
-`no-store` on `/api/`, `no-cache` on `/` and `*.html`. That is not tidiness — a
-cached `index.html` pins last week's JavaScript, and last week's JavaScript
-renders a picture line as a sentence. The stamped `/js` and `/css` files keep
-browser heuristics because their URL changes when their contents do.
+`no-store` on `/api/` **and on the shell** (`/`, `*.html`), `no-cache` on `/js/`
+and `/css/`, and `no-cache` + `ETag` on a picture. That is not tidiness. A cached
+`index.html` pins last week's JavaScript, and last week's JavaScript renders a
+picture line as a sentence. The shell is `no-store` rather than `no-cache`
+because a copy saved before any freshness header existed is governed purely by
+browser heuristics — Safari took a six-day-old shell as fresh for hours and asked
+the server for nothing in that window, so a header added later could not reach
+it. A picture is the one response worth keeping in the browser: it revalidates by
+`sha256` and answers 304 instead of arriving again at a hundred kilobytes.
 
 ## Client model — codex terminology
 

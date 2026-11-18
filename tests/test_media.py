@@ -131,13 +131,18 @@ def test_an_unchanged_picture_comes_back_as_304(book):
     assert not again.content
 
 
-def test_the_shell_is_revalidated_so_stamped_files_cannot_be_pinned(book):
+def test_the_shell_is_never_stored_so_a_stale_layout_engine_cannot_survive(book):
     """A cached index.html is a stale layout engine: it renders a picture line
-    as a sentence. The API must not be cached at all."""
-    assert book.get("/").headers["cache-control"] == "no-cache"
-    assert book.get("/index.html").headers["cache-control"] == "no-cache"
+    as a sentence, and a shell cached with no freshness headers at all can sit in
+    Safari for hours without ever asking the server again. The API must not be
+    cached at all; the stamped code must always be revalidated."""
+    assert book.get("/").headers["cache-control"] == "no-store"
+    assert book.get("/index.html").headers["cache-control"] == "no-store"
     assert book.get("/api/entries").headers["cache-control"] == "no-store"
     assert book.get("/api/media").headers["cache-control"] == "no-store"
+    assert book.get("/js/layout.js").headers["cache-control"] == "no-cache"
+    # A picture is worth caching: bytes are revalidated by sha256, not refetched.
+    assert book.get("/media/01-first.jpg").headers["cache-control"] == "no-cache"
 
 
 def test_picture_bytes_never_enter_a_body_or_an_export(book):
