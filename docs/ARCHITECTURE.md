@@ -101,8 +101,9 @@ rendered as the picture instead of as words. Nothing else about the format chang
 - The bytes live in a `media` table **in the same database file** as the entries:
   `name` (primary key, and the only thing a body line names), `mime`, `bytes`,
   `sha256`, `created_at`, `updated_at`. There is no picture folder to keep in step
-  with the book, so the `.db` file *is* the whole book — what gets shipped to the Pi,
-  what a backup restores, what an export of the words does not have to carry.
+  with the book, so the `.db` file *is* the whole book — what gets shipped to the
+  deployment host, what a backup restores, what an export of the words does not
+  have to carry.
   `python -m dua.media_add FILE…` puts pictures in over HTTP, so the app stays the
   only writer of its own database. The words in a picture stay inside the picture:
   there is no alt text, because a caption field would be a second place the author's
