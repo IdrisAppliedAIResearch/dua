@@ -10,8 +10,8 @@ gold rules, no toolbars, no labels — the book is the interface.
 </p>
 
 <p align="center">
-  <sub>The cover as it opens, and folio 31 — a picture in the book is one block</sub>
-  <sub>on its own page, held in the same database as the words.</sub>
+  <sub>The book closed, and folio 31 — a picture lives on its own page,</sub>
+  <sub>inside the same database as the words.</sub>
 </p>
 
 ## First-time setup
