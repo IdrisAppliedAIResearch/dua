@@ -3,6 +3,17 @@
 A book of daily duʿās: deep-emerald cover, turning leaves, cream paper,
 gold rules, no toolbars, no labels — the book is the interface.
 
+<p align="center">
+  <img src="docs/images/dua-title-page.jpg" width="340" alt="The book closed: a deep-emerald cover with a gold double rule, DUA lettered in gold small capitals above دعاء and a small gold rosette." />
+  &nbsp;
+  <img src="docs/images/dua-page-al-fatiha.jpg" width="340" alt="One page of the book: a photograph of Sūrah Al-Fātiḥah, framed in blue and gold floral illumination, laid into cream paper with its folio number at the foot." />
+</p>
+
+<p align="center">
+  <sub>The cover as it opens, and folio 31 — a picture in the book is one block</sub>
+  <sub>on its own page, held in the same database as the words.</sub>
+</p>
+
 ## First-time setup
 
 Requires Python 3.11+ and (for the QA harness only) Node.js with a headless
