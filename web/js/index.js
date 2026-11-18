@@ -1,9 +1,10 @@
 // Scrollable index overlay + fast travel by page number.
 // Names are the separate `name` column (or title, or first words as fallback);
 // entry bodies are never touched here.
-import { state } from "./state.js?v=20261112c";
-import { book } from "./book.js?v=20261112c";
-import { editor } from "./editor.js?v=20261112c";
+import { state } from "./state.js?v=20261118a";
+import { mediaSrc } from "./layout.js?v=20261118a";
+import { book } from "./book.js?v=20261118a";
+import { editor } from "./editor.js?v=20261118a";
 
 const tab = document.getElementById("index-tab");
 const overlay = document.getElementById("index-overlay");
@@ -25,7 +26,15 @@ const justScrolled = () => Date.now() - lastScroll < 350;
 export function entryLabel(entry) {
   if (entry.name && entry.name.trim()) return entry.name.trim();
   if (entry.title && entry.title.trim()) return entry.title.trim();
-  const words = (entry.body || "").trim().split(/\s+/).slice(0, 5).join(" ");
+  // a picture's file line is not words to read out: skip those sections
+  const words = (entry.body || "")
+    .split(/\n[ \t\u00a0]*\n/)
+    .filter((s) => !mediaSrc(s))
+    .join("\n\n")
+    .trim()
+    .split(/\s+/)
+    .slice(0, 5)
+    .join(" ");
   return words + "…";
 }
 

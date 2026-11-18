@@ -48,7 +48,9 @@ dua/
     js/editor.js       edit mode: in-place contenteditable + icon rail
     fonts/              vendored woff2 + fonts.css
   data/                 dua.db (created at runtime; never committed)
+    media/              pictures referenced by media/<file> lines in bodies
   tests/test_api.py     CRUD workflow tests (pytest)
+  tests/test_media.py   /media mount + media-line round-trip tests (pytest)
   qa/shot.mjs           headless-Chrome screenshot tool (raw CDP)
   qa/workflow.mjs       scripted end-to-end user-workflow test (raw CDP)
   docs/ARCHITECTURE.md  this file
@@ -67,7 +69,7 @@ entries(
   date TEXT,                     -- dua date YYYY-MM-DD, or NULL for undated
   title TEXT NOT NULL DEFAULT '',-- what the page itself shows
   name TEXT NOT NULL DEFAULT '', -- short index label (index only, never displayed on the page)
-  body TEXT NOT NULL,            -- plain text; paragraphs separated by \n
+  body TEXT NOT NULL,            -- plain text; paragraphs separated by \n\n
   created_at TEXT NOT NULL,      -- ISO-8601 UTC
   updated_at TEXT NOT NULL       -- ISO-8601 UTC
 )
@@ -75,6 +77,24 @@ entries(
 
 No rich text, no markdown: plain text is the most durable format. Paragraphs = blank
 lines. The client renders them typographically; the server never interprets them.
+
+**The one extension: an embedded picture is a paragraph that names a file.** A body
+paragraph whose entire text matches `media/<name>.<jpg|jpeg|png|webp|gif>` (letter or
+digit first, no leading path, no spaces around it) is stored as that exact line and
+rendered as the picture instead of as words. Nothing else about the format changes:
+
+- The API and the export still carry plain text. The line *is* the reference, so a
+  backup of the SQLite file or an `/api/export` JSON still says which picture belongs
+  where — even if the file itself is gone.
+- `media/` files live in a directory beside the database (`data/media/` by default,
+  `DUA_MEDIA` to move it), served read-only by the app at `/media/<name>`. The words
+  in a picture stay inside the picture: there is no alt text, because a caption field
+  would be a second place the author's words could drift.
+- The server never rewrites or validates these lines — it has no idea they are
+  special. Only `layout.js` recognizes them (`MEDIA_RE`); `/media` is a plain
+  read-only static mount that knows only filenames. Anything that merely *looks*
+  like a marker — `media/x.jpg extra words`, `Media/x.jpg`, a nested path — stays an
+  ordinary line of text.
 
 ### REST surface (`/api`)
 
@@ -100,7 +120,11 @@ connection is never touched concurrently). Unexpected exceptions return an opaqu
 500 and are logged with traceback on the server. Everything else talks HTTP.
 
 Runtime config is env-only: `DUA_PORT` (8644), `DUA_HOST`
-(127.0.0.1), `DUA_DB` (data/dua.db).
+(127.0.0.1), `DUA_DB` (data/dua.db), `DUA_MEDIA` (a directory beside `DUA_DB`).
+
+Outside `/api` there are two static mounts, `/media/<file>` (pictures, created on boot
+if the directory is missing; a miss is a plain 404 and never falls through to the app)
+and `/` (the `web/` shell).
 
 ## Client model — codex terminology
 
@@ -122,17 +146,53 @@ are rendered.
 ### Layout engine (`layout.js`)
 
 Entries are laid out *chapter-style*: every entry starts at the top of a fresh page.
-A too-long entry splits at line boundaries.
+A too-long entry splits across pages.
 
-Algorithm per entry: render its block (date line, optional title, paragraphs) into
-an offscreen measuring clone with identical typography; if it fits one page height,
-emit one page; otherwise greedily fill pages, binary-searching the largest word
-prefix of the overflowing paragraph that fits the page height. Output: ordered array
-of `{ kind, entryId?, blocks[] }` page descriptors consumed by `book.js`.
+Algorithm per entry: split the body into paragraphs (blank lines), then fill pages.
+Each paragraph is filled by the one routine that suits its kind, so nothing is ever
+split in a way that mangles it:
 
-Re-layout triggers: entry mutations, window resize (debounced), font load.
+| Paragraph | Routine | Split rule |
+|---|---|---|
+| prose | `fillProse` | binary-search the largest **word** prefix that fits; the remainder carries to the next page |
+| contains a newline (a stanza / hard-broken line) | `fillStanza` | **line-atomic**: whole lines only, never mid-line |
+| `media/<file>` | `fillImage` | **block-atomic**: a picture never splits; if it does not fit, it moves whole |
+
+Heights are measured, not estimated: `blockHeight()` renders into the offscreen
+`#measure` with identical typography and asks for its height. Output is an ordered
+array of page descriptors `{ entryId, entry, paras[], header, cont }` consumed by
+`book.js`; `header` marks the descriptor that carries the date/title line, and **`cont`
+is the seam marker** — one space when a prose section was cut mid-sentence, one newline
+when a stanza was cut mid-stanza, empty when this page simply starts a new section.
+`cont` is what lets the editor tell "this page starts a new paragraph" apart from "this
+page continues the paragraph above", which is a distinction the *stored text* has to
+survive.
+
+Re-layout triggers: entry mutations, window resize (debounced), font load, and — for
+pictures — the arrival of a real `naturalWidth/naturalHeight` (the aspect-ratio cache
+bumps an `aspectEpoch`, debounced re-paginate), because a picture's height is not
+knowable before it loads. Layout is memoized per `colW x colH x aspectEpoch` and
+validated per entry by `layoutSignature(entry)` (body, date, title).
 Folios and pagination are pure functions of the entry list — the server never knows
 about pages.
+
+### The body is invariant
+
+The author's words are devotional text: a save must reproduce them byte for byte, and
+an edit that only changes one line must not reflow, re-space or re-break anything else.
+Two rules keep that true, both guarded by tests:
+
+1. **A page seam is not a paragraph break.** `editor.collect()` reads the faces back
+   into body text. Where two faces continue one section (the `cont` marker above), the
+   separator is restored from `data-cont` (space or newline), *not* from the blank line
+   that visually separates paragraphs — otherwise merely opening and saving a long
+   entry would weld or split sections at wherever the last window size happened to cut.
+   Guarded by `qa/workflow.mjs` ("opening and saving an entry leaves its text
+   byte-identical").
+2. **Never use `innerText` to read a page back.** Off-screen faces are `display:none`,
+   where `innerText` silently drops every hard line break. `paraText()` walks child
+   nodes instead (text, `BR`, block elements) so a stanza on page nine survives the
+   same as one on page one.
 
 ### State machine (`state.js`)
 
@@ -159,6 +219,12 @@ only in client memory; the first save POSTs.
   at the page's bottom-outer corner: ✓ save · ✕ cancel · 🗑 delete (delete is
   two-step: first click arms the icon, second click commits; any other action
   disarms). Ctrl/Cmd+S saves. Esc cancels (reverts to last saved snapshot).
+- Pictures in edit mode are stones, not text: the `<img>` block is
+  `contenteditable=false` and unmarked, so the caret flows around it. Backspace at its
+  edge arms it (red frame, same two-step as 🗑) and a second Backspace deletes the
+  marker line — which is the only way a picture leaves the book, so the file itself is
+  never touched. A `media/…` line whose file is missing renders as its own text, so the
+  reference stays visible and editable rather than showing a broken-image glyph.
 - Keyboard: `→`/`Space`/`PgDn` next · `←`/`PgUp` prev · `Home` close (to cover,
   from first spread) · `End` last page · `Enter`/`Space` on cover opens · `e` edit
   entry under caret region · `n` new entry.

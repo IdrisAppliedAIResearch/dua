@@ -42,14 +42,38 @@ of the project; the code is what this repository offers for use.)
   (click it twice — first click arms it).
 - Close: Esc or Home, or click the desk beside the book.
 
+## Pictures
+
+A page can hold a picture — a photo of a page from a book, a note, a wall.
+Put the file in `data/media/` and give the entry a paragraph that is *only*
+the path to it:
+
+    And I write this so I remember where I was:
+
+    media/01-IMG_1578.jpg
+
+    O Allah, keep it with me.
+
+The line is the whole reference: it is stored as plain text, so the entry
+still names its picture in a database backup or an export even if the file is
+gone (then the line simply shows itself instead of a broken image). Pictures
+are laid out as blocks — they never split across a page — and they keep their
+own aspect ratio. To remove one, press Backspace at its edge once to arm it
+and again to delete the line; the file on disk is never touched.
+
+There is deliberately no alt text or caption field: the words in a picture
+belong to the picture. If a picture needs a sentence of its own, type the
+sentence as a paragraph next to it.
+
 ## Development
 
-    python -m pytest tests -q      # API workflow tests
+    python -m pytest tests -q      # API + media-store workflow tests
     node qa/workflow.mjs           # end-to-end browser workflow + screenshots
                                    # (spawns its own local server + temp DB)
 
 Env knobs: `DUA_PORT` (default 8644), `DUA_HOST` (default 127.0.0.1),
-`DUA_DB` (default `data/dua.db`).
+`DUA_DB` (default `data/dua.db`), `DUA_MEDIA` (default `media/` beside the
+database).
 
 See `docs/ARCHITECTURE.md` and `docs/WORKFLOW.md` for the design contract:
 one-page-at-a-time pagination, phone-first layout, the editing model, and

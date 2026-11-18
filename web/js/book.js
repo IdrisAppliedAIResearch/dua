@@ -1,10 +1,33 @@
-import { state } from "./state.js?v=20261112c";
-import { PAD, formatDay } from "./layout.js?v=20261112c";
+import { state } from "./state.js?v=20261118a";
+import { PAD, formatDay, mediaSrc, mediaAspect, noteMediaAspect } from "./layout.js?v=20261118a";
 
 const TURN_MS = 780;
 
 function svg(paths) {
   return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${paths}</svg>`;
+}
+
+// A picture section: an atomic, never-caret-edited block holding the file the
+// body line names. data-src keeps the author's own line for the editor to
+// serialize back verbatim; a file that is not there renders as that line.
+function mediaEl(src) {
+  const p = document.createElement("p");
+  p.className = "e-media";
+  p.dataset.src = src;
+  p.setAttribute("contenteditable", "false");
+  const img = document.createElement("img");
+  img.src = src;
+  img.alt = "";
+  const r = mediaAspect(src);
+  if (r) img.style.aspectRatio = r.toFixed(4);
+  img.addEventListener("load", () => noteMediaAspect(src, img.naturalWidth, img.naturalHeight));
+  img.addEventListener("error", () => {
+    const t = document.createElement("p");
+    t.textContent = src;
+    p.replaceWith(t);
+  });
+  p.append(img);
+  return p;
 }
 
 const PENCIL = svg('<path d="M4 20l1.2-4.2L16.7 4.3a2.2 2.2 0 0 1 3.1 3.1L8.3 18.9 4 20z"/>');
@@ -158,14 +181,23 @@ export const book = {
         art.append(t);
       }
     }
-    for (const para of p.paras) {
+    p.paras.forEach((para, i) => {
+      const src = mediaSrc(para);
+      if (src) {
+        art.append(mediaEl(src));
+        return;
+      }
       const el2 = document.createElement("p");
-      para.split("\n").forEach((line, i) => {
-        if (i) el2.append(document.createElement("br")); // author's hard break
+      // the first paragraph of a page can be the tail of a section that broke
+      // across the turn: carry the seam so the editor writes the text back
+      // joined as it is stored instead of with a new blank line
+      if (i === 0 && p.cont) el2.dataset.cont = p.cont;
+      para.split("\n").forEach((line, j) => {
+        if (j) el2.append(document.createElement("br")); // author's hard break
         el2.append(document.createTextNode(line));
       });
       art.append(el2);
-    }
+    });
     body.append(art);
     el.append(body);
     if (face.num != null) {

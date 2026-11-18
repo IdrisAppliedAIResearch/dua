@@ -52,6 +52,48 @@ export function splitParas(body) {
     );
 }
 
+// An embedded picture is a section whose entire text is a media file path:
+//   media/01-IMG_1578.jpg
+// Plain text stays the only storage format. The line is a real relative path
+// to a file kept beside the database, so the book stays readable forever and
+// a missing file degrades to the line of text rather than a broken-image hole.
+const MEDIA_RE = /^media\/[A-Za-z0-9][A-Za-z0-9 ._[\]-]*\.(?:jpe?g|png|webp|gif)$/i;
+
+export function mediaSrc(section) {
+  const t = (section || "").trim();
+  return MEDIA_RE.test(t) ? t : null;
+}
+
+// Pagination needs a block's height before the browser has decoded the file,
+// so every rendered aspect ratio is remembered here. A ratio that arrives
+// late (first paint, cold cache) bumps the layout epoch and asks for one
+// debounced re-pagination; after that the page breaks are stable.
+const aspects = new Map();
+let aspectEpoch = 0;
+let aspectsChanged = null;
+let aspectsTimer = null;
+
+export function onMediaAspects(fn) {
+  aspectsChanged = fn;
+}
+
+export function mediaAspect(src) {
+  return aspects.get(src) || 0;
+}
+
+export function noteMediaAspect(src, w, h) {
+  if (!w || !h) return;
+  const r = w / h;
+  const old = aspects.get(src);
+  if (old && Math.abs(old - r) < 0.01) return;
+  aspects.set(src, r);
+  aspectEpoch++;
+  clearTimeout(aspectsTimer);
+  aspectsTimer = setTimeout(() => {
+    if (aspectsChanged) aspectsChanged();
+  }, 150);
+}
+
 const esc = (s) =>
   s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
@@ -78,8 +120,21 @@ function blockHeight(html) {
   return h;
 }
 
+// The measure copy of a picture must be typographically identical to the one
+// book.js puts on the page, or the paginator mis-measures the block.
+function mediaHtml(src) {
+  const r = mediaAspect(src);
+  const style = r ? ` style="aspect-ratio:${r.toFixed(4)}"` : "";
+  return `<p class="e-media" data-src="${esc(src)}"><img src="${esc(src)}" alt=""${style}></p>`;
+}
+
 function parasHtml(strings) {
-  return strings.map((s) => `<p>${esc(s).replace(/\n/g, "<br>")}</p>`).join("");
+  return strings
+    .map((s) => {
+      const src = mediaSrc(s);
+      return src ? mediaHtml(src) : `<p>${esc(s).replace(/\n/g, "<br>")}</p>`;
+    })
+    .join("");
 }
 
 function headerHtml(entry) {
@@ -111,12 +166,20 @@ function layoutEntry(entry, colH) {
   const headerH = blockHeight(headerHtml(entry));
   let cur = [];
   let avail = colH - headerH;
-  let page = { entryId: entry.id, entry, paras: cur, header: true };
+  // cont records, for a page's FIRST paragraph, that it is not a new section
+  // but the continuation of the last paragraph of the previous page: " " when
+  // a prose paragraph was broken between words, "\n" when a stanza was broken
+  // between lines, "" when the page really starts a new section. Without it
+  // the editor could not tell a page seam from an author's blank line, and
+  // saving an entry would write the seam into the text as a new paragraph.
+  let cont = "";
+  let page = { entryId: entry.id, entry, paras: cur, header: true, cont: "" };
   pages.push(page);
 
-  const newPage = () => {
+  const newPage = (carry = "") => {
     cur = [];
-    page = { entryId: entry.id, entry, paras: cur, header: false };
+    cont = carry;
+    page = { entryId: entry.id, entry, paras: cur, header: false, cont };
     pages.push(page);
     avail = colH;
   };
@@ -124,6 +187,7 @@ function layoutEntry(entry, colH) {
   // prose: fill the current page with as many words as fit, continue after
   const fillProse = (para) => {
     let words = para.split(" ");
+    let placed = false; // has any of this section gone on a page yet?
     while (words.length) {
       if (blockHeight(parasHtml(cur.concat([words.join(" ")]))) <= avail) {
         cur.push(words.join(" "));
@@ -140,10 +204,15 @@ function layoutEntry(entry, colH) {
         }
       }
       if (lo === 0 && cur.length === 0) lo = 1;
-      if (lo > 0) cur.push(words.slice(0, lo).join(" "));
+      if (lo > 0) {
+        cur.push(words.slice(0, lo).join(" "));
+        placed = true;
+      }
       words = words.slice(lo);
       if (!words.length) break;
-      newPage();
+      // the next page starts with the rest of this section only if part of it
+      // is already behind us; a section that merely did not fit starts fresh
+      newPage(placed ? " " : "");
     }
   };
 
@@ -152,6 +221,7 @@ function layoutEntry(entry, colH) {
   // own first line is too tall even for a fresh column
   const fillStanza = (para) => {
     let lines = para.split("\n");
+    let placed = false; // has any of this stanza gone on a page yet?
     while (lines.length) {
       if (blockHeight(parasHtml(cur.concat([lines.join("\n")]))) <= avail) {
         cur.push(lines.join("\n"));
@@ -169,7 +239,7 @@ function layoutEntry(entry, colH) {
       }
       if (lo === 0) {
         if (cur.length > 0) {
-          newPage();
+          newPage(placed ? "\n" : "");
           continue;
         }
         // fresh page and the first line alone overflows the column:
@@ -187,26 +257,44 @@ function layoutEntry(entry, colH) {
         }
         if (wlo === 0) wlo = 1;
         cur.push(words.slice(0, wlo).join(" "));
+        placed = true;
         const left = words.slice(wlo).join(" ");
         lines = left ? [left].concat(lines.slice(1)) : lines.slice(1);
-        newPage();
+        // the break fell inside one line: the seam was a space, not a hard break
+        newPage(" ");
         continue;
       }
       cur.push(lines.slice(0, lo).join("\n"));
+      placed = true;
       lines = lines.slice(lo);
-      if (lines.length) newPage();
+      if (lines.length) newPage("\n");
     }
   };
 
+  // a picture is one atomic block: it never splits and never shares a page
+  // with a block that would overflow. One taller than the column is clamped by
+  // CSS on its own page, so pagination always makes progress.
+  const fillImage = (para) => {
+    if (blockHeight(parasHtml(cur.concat([para]))) <= avail) {
+      cur.push(para);
+      return;
+    }
+    if (cur.length) newPage();
+    cur.push(para);
+  };
+
   for (const para of paras) {
-    if (para.includes("\n")) fillStanza(para);
+    if (mediaSrc(para)) fillImage(para);
+    else if (para.includes("\n")) fillStanza(para);
     else fillProse(para);
   }
   return pages;
 }
 
 export function computePages(entries, colH, colW) {
-  const geomKey = `${colW}x${colH}`;
+  // aspectEpoch is part of the key because a picture measured with an assumed
+  // ratio must never keep its pages after the real ratio arrives
+  const geomKey = `${colW}x${colH}x${aspectEpoch}`;
   let cache = caches.get(geomKey);
   if (!cache) {
     caches.clear(); // only the current column size is ever laid out again

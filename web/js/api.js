@@ -1,4 +1,4 @@
-import { state } from "./state.js?v=20261112c";
+import { state } from "./state.js?v=20261118a";
 
 const base = "/api";
 

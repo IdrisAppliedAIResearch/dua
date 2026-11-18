@@ -788,6 +788,51 @@ try {
     "phone gap created by Enter persists to the server"
   );
 
+  // A no-op edit must not rewrite the author's words, byte for byte. Two
+  // hazards cover it: a section longer than a page (the paginator splits it at
+  // a word, and that seam must never be saved as a blank line) and a stanza
+  // with hard breaks on a page that is not on screen (display:none makes
+  // innerText drop every <br>).
+  const longProse = Array.from({ length: 240 }, (_, i) => `filler${i}`).join(" ");
+  const stanza = "first hard-broken line\nsecond hard-broken line\nthird hard-broken line";
+  const ghostBody = `${longProse}\n\n${stanza}\n\n${longProse.split(" ").reverse().join(" ")}`;
+  const ghostId = await cdp.eval(
+    `fetch('/api/entries', { method: 'POST', headers: { 'content-type': 'application/json' },
+       body: JSON.stringify({ date: null, title: '', name: '', body: ${JSON.stringify(ghostBody)} }) })
+     .then(r => r.json()).then(e => e.id)`
+  );
+  await cdp.eval(`(async () => {
+    const D = window.__dua;
+    D.state.entries = await (await fetch('/api/entries')).json();
+    D.rerender();
+    while (D.book.busy) await new Promise((r) => setTimeout(r, 60));
+  })()`);
+  await cdp.waitIdle();
+  const seamCount = await cdp.eval(
+    `(() => {
+      const D = window.__dua;
+      D.editor.enter(${ghostId});
+      return {
+        paragraphs: document.querySelectorAll('.entry[data-id="${ghostId}"] p').length,
+        seams: document.querySelectorAll('.entry[data-id="${ghostId}"] [data-cont]').length,
+      };
+    })()`
+  );
+  assert(seamCount.paragraphs > 3, "long entry paginates into several paragraphs");
+  assert(seamCount.seams >= 2, "page seams inside one section are marked as continuations");
+  await cdp.key("s", { modifiers: 2, text: "s" });
+  await cdp.waitFor("window.__dua.state.editing === null");
+  await cdp.waitIdle();
+  const afterNoopEdit = await cdp.eval(
+    `fetch('/api/entries').then(r=>r.json()).then(a=>a.find(e=>e.id===${ghostId}).body)`
+  );
+  assert(
+    afterNoopEdit === ghostBody,
+    `opening and saving an entry leaves its text byte-identical (${ghostBody.length} → ${
+      afterNoopEdit.length
+    } chars, ${ghostBody.split("\n\n").length} → ${afterNoopEdit.split("\n\n").length} sections)`
+  );
+
   cdp.close();
   chrome.kill();
 } finally {

@@ -1,9 +1,9 @@
 // INVARIANT: entry text is the author's, verbatim. Nothing here may rewrite,
 // correct, or reformat a saved entry's words — only the author's own edits change them.
-import { state, sortEntries, findEntry } from "./state.js?v=20261112c";
-import { api } from "./api.js?v=20261112c";
-import { todayISO, parseDay } from "./layout.js?v=20261112c";
-import { book } from "./book.js?v=20261112c";
+import { state, sortEntries, findEntry } from "./state.js?v=20261118a";
+import { api } from "./api.js?v=20261118a";
+import { todayISO, parseDay, mediaSrc } from "./layout.js?v=20261118a";
+import { book } from "./book.js?v=20261118a";
 
 function svg(paths) {
   return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${paths}</svg>`;
@@ -21,6 +21,7 @@ export const editor = {
   active: null,
   hooks: null,
   delTimer: null,
+  mediaTimer: null,
   reflowTimer: null,
   suppressChar: false,
 
@@ -56,6 +57,23 @@ export const editor = {
       const other = back ? paras[idx - 1] : paras[idx + 1];
       if (!other) return;
       if (!this.caretAtEdge(sel, p, back ? "start" : "end")) return;
+      // The boundary here may not be the author's blank line at all but the
+      // seam where the paginator broke one section across a page turn. There
+      // is no gap to delete there — merging the halves would weld two words
+      // together — so the key does nothing.
+      const seam = back ? p : other;
+      if (seam.dataset && seam.dataset.cont !== undefined) {
+        ev.preventDefault();
+        return;
+      }
+      // A picture is a block, not a paragraph to merge into: deleting the gap
+      // beside it removes the picture itself, on the same two-step terms as
+      // deleting an entry, so a stray Backspace can never eat an image.
+      if (other.classList.contains("e-media")) {
+        ev.preventDefault();
+        this.deleteMedia(other, back);
+        return;
+      }
       ev.preventDefault();
       this.mergeSections(back ? other : p, back ? p : other);
     });
@@ -151,6 +169,35 @@ export const editor = {
     if (caret !== null) this.followCaret(caret);
   },
 
+  // Removing a picture is a two-step on the same terms as deleting an entry:
+  // the first press marks the block that is about to go, the second lets it
+  // go, and either way the body loses exactly its own file line.
+  deleteMedia(mediaEl, back) {
+    if (!mediaEl.classList.contains("armed")) {
+      mediaEl.classList.add("armed");
+      clearTimeout(this.mediaTimer);
+      this.mediaTimer = setTimeout(() => mediaEl.classList.remove("armed"), 4000);
+      return;
+    }
+    clearTimeout(this.mediaTimer);
+    const entry = findEntry(this.active.id);
+    if (!entry) return;
+    const caret = this.caretOffset();
+    const arts = [...book.el.querySelectorAll(`.entry[data-id="${this.active.id}"]`)];
+    const paras = arts.flatMap((a) => [...a.querySelectorAll("p")]);
+    const at = paras.indexOf(mediaEl);
+    // removing the block removes its text and the separator that joined it
+    const shift =
+      this.paraText(mediaEl).length +
+      (at + 1 < paras.length ? this.sepBefore(paras[at + 1]).length : this.sepBefore(mediaEl).length);
+    mediaEl.remove();
+    Object.assign(entry, this.collect());
+    this.unmarkDom();
+    this.hooks.rerender();
+    this.mark();
+    if (caret !== null) this.followCaret(back ? Math.max(0, caret - shift) : caret);
+  },
+
   // the editable paragraph currently holding the caret, if it belongs to the
   // entry being edited
   caretParagraph() {
@@ -225,7 +272,15 @@ export const editor = {
       const wrap = a.closest(".page-body");
       return wrap && wrap.scrollHeight - wrap.clientHeight > 1;
     });
-    if (!overflowing) return;
+    // a section that has just become (or stopped being) a picture changes the
+    // page breaks without overflowing, so it needs its own relayout trigger:
+    // typing media/foo.jpg turns into the picture itself
+    const changedMedia = arts.some((a) =>
+      [...a.querySelectorAll("p")].some(
+        (p) => !!mediaSrc(this.paraText(p)) !== p.classList.contains("e-media"),
+      ),
+    );
+    if (!overflowing && !changedMedia) return;
     if (book.busy) {
       this.scheduleReflow();
       return;
@@ -254,7 +309,7 @@ export const editor = {
     const idx = paras.indexOf(p);
     if (idx < 0) return null;
     let acc = 0;
-    for (let i = 0; i < idx; i++) acc += paras[i].innerText.length + 2;
+    for (let i = 0; i < idx; i++) acc += this.paraText(paras[i]).length + this.sepBefore(paras[i + 1] || p).length;
     let local = 0;
     const walker = document.createTreeWalker(p, NodeFilter.SHOW_TEXT);
     let n;
@@ -265,9 +320,11 @@ export const editor = {
       }
       local += n.length;
     }
-    return acc + Math.min(local, p.innerText.length);
+    return acc + Math.min(local, this.paraText(p).length);
   },
 
+  // Sections holding a picture carry no caret: a page break that lands there
+  // parks the caret at the start of the next real paragraph.
   followCaret(globalOffset) {
     const arts = [...book.el.querySelectorAll(`.entry[data-id="${this.active.id}"]`)];
     const paras = arts.flatMap((a) => [...a.querySelectorAll("p")]);
@@ -275,21 +332,34 @@ export const editor = {
     let acc = 0;
     let target = null;
     let local = 0;
-    for (const p of paras) {
-      const len = p.innerText.length;
+    for (let i = 0; i < paras.length; i++) {
+      const p = paras[i];
+      acc += i === 0 ? 0 : this.sepBefore(p).length;
+      const len = this.paraText(p).length;
       if (globalOffset <= acc + len) {
         target = p;
         local = globalOffset - acc;
         break;
       }
-      acc += len + 2;
+      acc += len;
     }
-    if (!target) {
-      target = paras[paras.length - 1];
-      local = target.innerText.length;
+    if (!target || target.classList.contains("e-media")) {
+      // continue in the nearest section made of words: the one right after
+      // the picture, else the one before it
+      const i = target ? paras.indexOf(target) : paras.length - 1;
+      const next = paras.slice(i + 1).find((p) => !p.classList.contains("e-media"));
+      if (next) {
+        target = next;
+        local = 0;
+      } else {
+        const prev = paras.slice(0, i).reverse().find((p) => !p.classList.contains("e-media"));
+        if (!prev) return;
+        target = prev;
+        local = this.paraText(prev).length;
+      }
     }
     this.revealFace(target);
-    this.setCaretIn(target, local);
+    this.setCaretIn(target, Math.min(local, this.paraText(target).length));
   },
 
   setCaretIn(p, target) {
@@ -352,6 +422,8 @@ export const editor = {
         art.append(p); // an empty draft still needs one editable paragraph
       }
       art.querySelectorAll(".e-date,.e-title,p").forEach((el2) => {
+        // a picture is a block, not text: the caret never goes inside one
+        if (el2.classList.contains("e-media")) return;
         el2.setAttribute("contenteditable", "plaintext-only");
       });
       const face = art.closest(".face");
@@ -388,11 +460,11 @@ export const editor = {
       return f && (f.classList.contains("cur-left") || f.classList.contains("cur-right"));
     });
     const art =
-      visible.find((a) => a.querySelector("p")) ||
+      visible.find((a) => a.querySelector("p:not(.e-media)")) ||
       visible[0] ||
-      arts.find((a) => a.querySelector("p")) ||
+      arts.find((a) => a.querySelector("p:not(.e-media)")) ||
       arts[0];
-    const paras = art ? [...art.querySelectorAll("p")] : [];
+    const paras = art ? [...art.querySelectorAll("p")].filter((p) => !p.classList.contains("e-media")) : [];
     const p = paras[paras.length - 1];
     if (!p) return null;
     p.focus();
@@ -431,10 +503,47 @@ export const editor = {
   finish() {
     clearTimeout(this.delTimer);
     clearTimeout(this.reflowTimer);
+    clearTimeout(this.mediaTimer);
     this.unmarkDom();
     document.body.classList.remove("mode-edit");
     state.editing = null;
     this.active = null;
+  },
+
+  // what stands between two rendered paragraphs in the stored text: the
+  // author's blank line, or the seam the paginator made when it broke one
+  // section across a page turn (carried on the tail paragraph as data-cont)
+  sepBefore(el) {
+    const c = el.dataset ? el.dataset.cont : undefined;
+    return c === "\n" ? "\n" : c === " " ? " " : "\n\n";
+  },
+
+  // The text a paragraph element stands for in the saved body: a picture
+  // stands for its own file line, everything else for its own nodes. This
+  // deliberately does NOT use innerText: innerText is computed from rendering,
+  // and every page except the one on screen is display:none — where it quietly
+  // drops each <br>, so saving an entry would delete the author's hard breaks
+  // on the pages they were not standing on. Whitespace is collapsed the way
+  // splitParas() collapses it, so the DOM and the saved text agree.
+  paraText(el) {
+    if (el.classList.contains("e-media")) return el.dataset.src || "";
+    let out = "";
+    const walk = (parent) => {
+      for (const c of parent.childNodes) {
+        if (c.nodeType === 3) out += c.data;
+        else if (c.nodeName === "BR") out += "\n";
+        else if (c.nodeName === "DIV" || c.nodeName === "P") {
+          if (out && !out.endsWith("\n")) out += "\n";
+          walk(c);
+        } else walk(c);
+      }
+    };
+    walk(el);
+    return out
+      .replace(/\u00a0/g, " ")
+      .replace(/\u200b/g, "")
+      .replace(/[ \t]+/g, " ")
+      .trim();
   },
 
   collect() {
@@ -447,11 +556,16 @@ export const editor = {
       ? arts[0].querySelector('[data-role="title"]').innerText.trim()
       : "";
     // blank paragraphs survive: an empty line between two paragraphs is an
-    // author's double Enter and stays one; the very ends are trimmed on save
-    const body = arts
-      .flatMap((a) => [...a.querySelectorAll("p")])
-      .map((p) => p.innerText.replace(/\u00a0/g, " ").replace(/\u200b/g, "").trim())
-      .join("\n\n");
+    // author's double Enter and stays one; the very ends are trimmed on save.
+    // A tail paragraph (data-cont) grows the section it belongs to, so a page
+    // seam is never written back as a paragraph break.
+    const parts = [];
+    for (const p of arts.flatMap((a) => [...a.querySelectorAll("p")])) {
+      const t = this.paraText(p);
+      if (!parts.length) parts.push(t);
+      else parts[parts.length - 1] += this.sepBefore(p) + t;
+    }
+    const body = parts.join("\n\n");
     const entry = findEntry(id);
     const date = dateText ? parseDay(dateText, entry.date) : entry.date;
     return { date, title, body };

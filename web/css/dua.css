@@ -338,6 +338,33 @@ body {
    line (two Enters) renders as a zero-height paragraph, doubling the gap */
 .page-body p + p, .measure p + p { margin-top: 1.62em; }
 
+/* ---------- embedded picture ---------- */
+
+/* A picture is a section, so it takes the same inter-section gap as a
+   paragraph (p + p above) and spans the whole column. The .measure copy must
+   stay identical to the one on the page or the paginator mis-measures it.
+   aspect-ratio is a placeholder until the file decodes; book.js then writes
+   the real ratio inline and the entry re-paginates once. */
+.page-body .e-media img,
+.measure .e-media img {
+  display: block;
+  width: 100%;
+  aspect-ratio: 1;
+  max-height: var(--col-h);
+  object-fit: contain;
+  background: #fbf6e9;
+  border: 1px solid rgba(36, 42, 33, 0.22);
+  box-shadow: 0 1px 4px rgba(36, 42, 33, 0.16);
+}
+
+/* edit mode: the picture is not text, so it is not outlined like one; the
+   two-step removal is shown in the same language as the entry trash */
+.entry.editing .e-media.armed img {
+  border-color: var(--danger);
+  box-shadow: 0 0 0 1px var(--danger), 0 1px 4px rgba(36, 42, 33, 0.16);
+  opacity: 0.6;
+}
+
 .folio {
   position: absolute;
   bottom: calc(var(--page-h) * 0.052);

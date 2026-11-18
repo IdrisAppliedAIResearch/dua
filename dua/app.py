@@ -87,5 +87,13 @@ def create_app(db_path: str | Path | None = None) -> FastAPI:
         logger.exception("unhandled error on %s %s", request.method, request.url.path)
         return JSONResponse({"detail": "server error"}, status_code=500)
 
+    # Embedded pictures: a body line naming media/<file> is served from a
+    # directory beside the database, never from the code tree. Registered
+    # before "/" so the static book client cannot swallow the path; a missing
+    # file is a 404 the client renders as the plain-text line it came from.
+    media_dir = Path(os.environ.get("DUA_MEDIA") or (Path(store.path).parent / "media"))
+    media_dir.mkdir(parents=True, exist_ok=True)
+    app.mount("/media", StaticFiles(directory=media_dir), name="media")
+
     app.mount("/", StaticFiles(directory=WEB_DIR, html=True), name="web")
     return app

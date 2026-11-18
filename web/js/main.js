@@ -1,9 +1,9 @@
-import { state } from "./state.js?v=20261112c";
-import { api } from "./api.js?v=20261112c";
-import { computePages } from "./layout.js?v=20261112c";
-import { book } from "./book.js?v=20261112c";
-import { editor } from "./editor.js?v=20261112c";
-import { indexPanel } from "./index.js?v=20261112c";
+import { state } from "./state.js?v=20261118a";
+import { api } from "./api.js?v=20261118a";
+import { computePages, onMediaAspects } from "./layout.js?v=20261118a";
+import { book } from "./book.js?v=20261118a";
+import { editor } from "./editor.js?v=20261118a";
+import { indexPanel } from "./index.js?v=20261118a";
 
 const offlineEl = document.getElementById("offline");
 const stage = document.getElementById("stage");
@@ -27,6 +27,16 @@ function rerender() {
   book.build(pages, geom);
   if (indexPanel.visible) indexPanel.render();
 }
+
+// A picture's true height is only known once its file has decoded, so the
+// first paint may have measured it with the assumed ratio: re-paginate for the
+// corrected breaks. Never under an open edit — that rebuilds the DOM out from
+// under the caret (same guard as the resize handler); finishing the edit
+// rerenders anyway.
+onMediaAspects(() => {
+  if (state.editing) return;
+  rerender();
+});
 
 async function boot() {
   editor.init({ rerender, setOffline });
