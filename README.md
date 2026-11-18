@@ -62,6 +62,11 @@ own aspect ratio. To remove one: click it (it goes red) and press Backspace, or
 Backspace twice at the edge of the text beside it. Either way only the line
 leaves the entry; the file on disk is never touched.
 
+The browser is what decodes the picture, so the file has to be a format it
+decodes — JPEG, PNG, WebP. An iPhone `.heic` photo shows nothing until it is
+converted; a straight re-encode at full size is enough (no cropping, no
+resizing — the layout scales it to the column).
+
 There is deliberately no alt text or caption field: the words in a picture
 belong to the picture. If a picture needs a sentence of its own, type the
 sentence as a paragraph next to it.
