@@ -58,8 +58,9 @@ The line is the whole reference: it is stored as plain text, so the entry
 still names its picture in a database backup or an export even if the file is
 gone (then the line simply shows itself instead of a broken image). Pictures
 are laid out as blocks — they never split across a page — and they keep their
-own aspect ratio. To remove one, press Backspace at its edge once to arm it
-and again to delete the line; the file on disk is never touched.
+own aspect ratio. To remove one: click it (it goes red) and press Backspace, or
+Backspace twice at the edge of the text beside it. Either way only the line
+leaves the entry; the file on disk is never touched.
 
 There is deliberately no alt text or caption field: the words in a picture
 belong to the picture. If a picture needs a sentence of its own, type the

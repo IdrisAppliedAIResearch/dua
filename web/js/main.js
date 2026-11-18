@@ -1,9 +1,9 @@
-import { state } from "./state.js?v=20261118a";
-import { api } from "./api.js?v=20261118a";
-import { computePages, onMediaAspects } from "./layout.js?v=20261118a";
-import { book } from "./book.js?v=20261118a";
-import { editor } from "./editor.js?v=20261118a";
-import { indexPanel } from "./index.js?v=20261118a";
+import { state } from "./state.js?v=20261118c";
+import { api } from "./api.js?v=20261118c";
+import { computePages, onMediaAspects } from "./layout.js?v=20261118c";
+import { book } from "./book.js?v=20261118c";
+import { editor } from "./editor.js?v=20261118c";
+import { indexPanel } from "./index.js?v=20261118c";
 
 const offlineEl = document.getElementById("offline");
 const stage = document.getElementById("stage");

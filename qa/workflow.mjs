@@ -1,18 +1,27 @@
 import { spawn } from "node:child_process";
-import { mkdirSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { startChrome, CDP, sleep, assert } from "./lib.mjs";
 
 const PORT = 8647;
 const CDP_PORT = 9335 + (process.pid % 50);
 const APP_URL = `http://127.0.0.1:${PORT}/`;
 const DB = process.env.TEMP + "/dua-e2e-" + Date.now() + ".db";
+const MEDIA = process.env.TEMP + "/dua-e2e-media-" + Date.now();
 
 mkdirSync(new URL("./shots/", import.meta.url), { recursive: true });
+mkdirSync(MEDIA, { recursive: true });
+// a real (tiny) PNG, so /media serves real bytes and the <img> decodes
+const PNG = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAAQAAAAECAYAAACp8Z5+AAAAFUlEQVR4nGP8z8DAwMDAxMDAwMAAAA" +
+    "wAAwA6eQx8AAAAAElFTkSuQmCC",
+  "base64"
+);
+for (const name of ["p1.png", "p2.png", "p3.png"]) writeFileSync(`${MEDIA}/${name}`, PNG);
 
 const server = spawn(
   "python",
   ["-c", "import uvicorn;from dua.app import create_app;uvicorn.run(create_app(),port=8647,log_level='warning')"],
-  { env: { ...process.env, DUA_DB: DB }, stdio: "ignore" }
+  { env: { ...process.env, DUA_DB: DB, DUA_MEDIA: MEDIA }, stdio: "ignore" }
 );
 
 let chrome = null;
@@ -831,6 +840,96 @@ try {
     `opening and saving an entry leaves its text byte-identical (${ghostBody.length} → ${
       afterNoopEdit.length
     } chars, ${ghostBody.split("\n\n").length} → ${afterNoopEdit.split("\n\n").length} sections)`
+  );
+
+  // --- a picture is a block -------------------------------------------------
+  // Three media lines inside one entry: they arrive as pictures without
+  // disturbing the words around them, and one of a *run* of them — which has no
+  // text beside it to Backspace from — comes away with a click plus a delete
+  // key, storing exactly its own line gone.
+  const picBody =
+    "text before the pictures\n\nmedia/p1.png\n\nmedia/p2.png\n\nmedia/p3.png\n\ntext after the pictures";
+  const picId = await cdp.eval(
+    `fetch('/api/entries', { method: 'POST', headers: { 'content-type': 'application/json' },
+       body: JSON.stringify({ date: null, title: '', name: '', body: ${JSON.stringify(picBody)} }) })
+     .then(r => r.json()).then(e => e.id)`
+  );
+  await cdp.eval(`(async () => {
+    const D = window.__dua;
+    D.state.entries = await (await fetch('/api/entries')).json();
+    D.rerender();
+    while (D.book.busy) await new Promise((r) => setTimeout(r, 60));
+  })()`);
+  await cdp.waitIdle();
+  // the <img> elements only know their size once the bytes have decoded
+  await cdp.waitFor(
+    `[...document.querySelectorAll('.entry[data-id="${picId}"] .e-media img')].every(
+      (i) => i.complete && i.naturalWidth > 0
+    )`,
+    8000
+  );
+  const shown = await cdp.eval(
+    `(() => {
+      const imgs = [...document.querySelectorAll('.entry[data-id="${picId}"] .e-media img')];
+      return { pictures: imgs.length, loaded: imgs.filter((i) => i.complete && i.naturalWidth > 0).length,
+               editable: [...document.querySelectorAll('.entry[data-id="${picId}"] .e-media')]
+                 .some((el) => el.isContentEditable) };
+    })()`
+  );
+  assert(
+    shown.pictures === 3 && shown.loaded === 3 && shown.editable === false,
+    `the three media lines become three decoded, non-editable pictures (${JSON.stringify(shown)})`
+  );
+
+  // stand wherever the run is visible, then edit it
+  const centreOf = (n) =>
+    cdp.eval(
+      `(async () => {
+        const b = window.__dua.book;
+        for (let s = 1; s <= b.max; s++) {
+          b.gotoInstant(s);
+          await new Promise((r) => setTimeout(r, 12));
+          const media = [...document.querySelectorAll(".face")]
+            .filter((f) => !f.closest(".leaf.dormant"))
+            .flatMap((f) => [...f.querySelectorAll('.entry[data-id="${picId}"] .e-media')]);
+          if (media.length > ${n}) {
+            const r = media[${n}].getBoundingClientRect();
+            return { spread: s, x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2) };
+          }
+        }
+        return null;
+      })()`
+    );
+  await centreOf(1);
+  await cdp.eval(`window.__dua.editor.enter(${picId})`);
+  await cdp.waitIdle();
+  const spot = await centreOf(1);
+  assert(spot !== null, "the run of pictures can be brought on screen");
+  await cdp.click(spot.x, spot.y);
+  await sleep(150);
+  const armedState = await cdp.eval(
+    `(() => {
+      const a = document.querySelector(".e-media.armed");
+      return { armed: a ? a.dataset.src : null, editable: a ? a.isContentEditable : null,
+               caretInText: !!window.__dua.editor.caretParagraph() };
+    })()`
+  );
+  await cdp.shot("qa/shots/17-picture-armed.png");
+  assert(
+    armedState.armed === "media/p2.png" && armedState.editable === false && !armedState.caretInText,
+    `clicking a picture arms it for removal, caret and page turn untouched (${JSON.stringify(armedState)})`
+  );
+  await cdp.key("Backspace");
+  await cdp.waitIdle();
+  await cdp.key("s", { modifiers: 2, text: "s" });
+  await cdp.waitFor("window.__dua.state.editing === null");
+  await cdp.waitIdle();
+  const picSaved = await cdp.eval(
+    `fetch('/api/entries').then(r=>r.json()).then(a=>a.find(e=>e.id===${picId}).body)`
+  );
+  assert(
+    picSaved === "text before the pictures\n\nmedia/p1.png\n\nmedia/p3.png\n\ntext after the pictures",
+    `removing one picture out of a run stores exactly its own line gone (${JSON.stringify(picSaved)})`
   );
 
   cdp.close();

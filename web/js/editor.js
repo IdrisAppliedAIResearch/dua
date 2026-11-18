@@ -1,9 +1,9 @@
 // INVARIANT: entry text is the author's, verbatim. Nothing here may rewrite,
 // correct, or reformat a saved entry's words — only the author's own edits change them.
-import { state, sortEntries, findEntry } from "./state.js?v=20261118a";
-import { api } from "./api.js?v=20261118a";
-import { todayISO, parseDay, mediaSrc } from "./layout.js?v=20261118a";
-import { book } from "./book.js?v=20261118a";
+import { state, sortEntries, findEntry } from "./state.js?v=20261118c";
+import { api } from "./api.js?v=20261118c";
+import { todayISO, parseDay, mediaSrc } from "./layout.js?v=20261118c";
+import { book } from "./book.js?v=20261118c";
 
 function svg(paths) {
   return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${paths}</svg>`;
@@ -76,6 +76,38 @@ export const editor = {
       }
       ev.preventDefault();
       this.mergeSections(back ? other : p, back ? p : other);
+    });
+    // Clicking a picture is how you reach one that has no text beside it (a
+    // run of them, laid out one after another): the block arms, and the next
+    // delete key removes its line. The click is consumed here so it cannot
+    // also turn the page.
+    book.el.addEventListener(
+      "click",
+      (ev) => {
+        if (!this.active) return;
+        const t = ev.target && ev.target.closest ? ev.target : null;
+        const media = t && t.closest ? t.closest(".e-media") : null;
+        if (!media) {
+          this.disarmMedia();
+          return;
+        }
+        ev.preventDefault();
+        ev.stopPropagation();
+        this.armMedia(media);
+      },
+      true
+    );
+    // A picture armed by that click takes the next delete key. This has to sit
+    // on the document: clicking a picture leaves the caret outside every
+    // editable host, and a delete key with no editable focus never produces a
+    // beforeinput for the page to intercept. The caret path (a picture next to
+    // text) is excluded below so the two never both act on one keypress.
+    document.addEventListener("keydown", (ev) => {
+      if (!this.active || (ev.key !== "Backspace" && ev.key !== "Delete")) return;
+      const armed = book.el.querySelector(".e-media.armed");
+      if (!armed || this.caretParagraph()) return;
+      ev.preventDefault();
+      this.commitMediaDelete(armed, ev.key === "Backspace");
     });
     // Enter is the author's blank line: it splits the section right at the
     // caret so a Notes-style gap opens there, and the caret moves to the new
@@ -174,11 +206,25 @@ export const editor = {
   // go, and either way the body loses exactly its own file line.
   deleteMedia(mediaEl, back) {
     if (!mediaEl.classList.contains("armed")) {
-      mediaEl.classList.add("armed");
-      clearTimeout(this.mediaTimer);
-      this.mediaTimer = setTimeout(() => mediaEl.classList.remove("armed"), 4000);
+      this.armMedia(mediaEl);
       return;
     }
+    this.commitMediaDelete(mediaEl, back);
+  },
+
+  armMedia(mediaEl) {
+    this.disarmMedia();
+    mediaEl.classList.add("armed");
+    clearTimeout(this.mediaTimer);
+    this.mediaTimer = setTimeout(() => this.disarmMedia(), 4000);
+  },
+
+  disarmMedia() {
+    clearTimeout(this.mediaTimer);
+    for (const el of book.el.querySelectorAll(".e-media.armed")) el.classList.remove("armed");
+  },
+
+  commitMediaDelete(mediaEl, back) {
     clearTimeout(this.mediaTimer);
     const entry = findEntry(this.active.id);
     if (!entry) return;
@@ -503,7 +549,7 @@ export const editor = {
   finish() {
     clearTimeout(this.delTimer);
     clearTimeout(this.reflowTimer);
-    clearTimeout(this.mediaTimer);
+    this.disarmMedia();
     this.unmarkDom();
     document.body.classList.remove("mode-edit");
     state.editing = null;

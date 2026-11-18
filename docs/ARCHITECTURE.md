@@ -220,11 +220,17 @@ only in client memory; the first save POSTs.
   two-step: first click arms the icon, second click commits; any other action
   disarms). Ctrl/Cmd+S saves. Esc cancels (reverts to last saved snapshot).
 - Pictures in edit mode are stones, not text: the `<img>` block is
-  `contenteditable=false` and unmarked, so the caret flows around it. Backspace at its
-  edge arms it (red frame, same two-step as 🗑) and a second Backspace deletes the
-  marker line — which is the only way a picture leaves the book, so the file itself is
-  never touched. A `media/…` line whose file is missing renders as its own text, so the
-  reference stays visible and editable rather than showing a broken-image glyph.
+  `contenteditable=false` and unmarked, so the caret flows around it. Two gestures
+  remove one, both two-step: Backspace/Delete at the edge of the text beside it
+  arms it, and a second press removes the marker line — or, when a picture has no
+  text beside it (a run of them, one after another, which is how the author keeps
+  hers), a click arms it and the next delete key commits. The click is consumed by
+  the editor so it cannot also turn the page. Either way only the line leaves the
+  body; the file on disk is never touched. That second gesture exists because a
+  `contenteditable=false` island produces no `beforeinput` of its own, so the
+  delete key for an armed picture is listened for on the document, not the page.
+  A `media/…` line whose file is missing renders as its own text, so the reference
+  stays visible and editable rather than showing a broken-image glyph.
 - Keyboard: `→`/`Space`/`PgDn` next · `←`/`PgUp` prev · `Home` close (to cover,
   from first spread) · `End` last page · `Enter`/`Space` on cover opens · `e` edit
   entry under caret region · `n` new entry.

@@ -1,10 +1,10 @@
 // Scrollable index overlay + fast travel by page number.
 // Names are the separate `name` column (or title, or first words as fallback);
 // entry bodies are never touched here.
-import { state } from "./state.js?v=20261118a";
-import { mediaSrc } from "./layout.js?v=20261118a";
-import { book } from "./book.js?v=20261118a";
-import { editor } from "./editor.js?v=20261118a";
+import { state } from "./state.js?v=20261118c";
+import { mediaSrc } from "./layout.js?v=20261118c";
+import { book } from "./book.js?v=20261118c";
+import { editor } from "./editor.js?v=20261118c";
 
 const tab = document.getElementById("index-tab");
 const overlay = document.getElementById("index-overlay");

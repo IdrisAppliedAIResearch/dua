@@ -357,8 +357,13 @@ body {
   box-shadow: 0 1px 4px rgba(36, 42, 33, 0.16);
 }
 
-/* edit mode: the picture is not text, so it is not outlined like one; the
-   two-step removal is shown in the same language as the entry trash */
+/* edit mode: the picture is not text, so it is not outlined like one; a
+   pointing hand is the whole affordance that clicking it arms the removal, and
+   the two-step is then shown in the same language as the entry trash */
+.entry.editing .e-media img {
+  cursor: pointer;
+}
+
 .entry.editing .e-media.armed img {
   border-color: var(--danger);
   box-shadow: 0 0 0 1px var(--danger), 0 1px 4px rgba(36, 42, 33, 0.16);

@@ -1,5 +1,5 @@
-import { state } from "./state.js?v=20261118a";
-import { PAD, formatDay, mediaSrc, mediaAspect, noteMediaAspect } from "./layout.js?v=20261118a";
+import { state } from "./state.js?v=20261118c";
+import { PAD, formatDay, mediaSrc, mediaAspect, noteMediaAspect } from "./layout.js?v=20261118c";
 
 const TURN_MS = 780;
 
